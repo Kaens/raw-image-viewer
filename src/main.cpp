@@ -14,6 +14,7 @@
 #include <optional>
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
@@ -106,11 +107,11 @@ static vector<Preset> build_presets() { //not all of these are common
 struct ViewerState {
     vector<uint8_t> data;
     string filename;
-    int stofs_bytes = 0;
+    int stofs = 0;
     int width_px = 256; // "int" as per InputInt in ImGui
     int bpp = 8;
     int bit_align = 0;
-    int preset_idx = 0;
+    int preset_idx = 3; // 8-bit grayscale, corresponds with bpp
     bool bit_order_msb = true;
     bool byte_order_le = false;
 };
@@ -131,7 +132,7 @@ static inline uint8_t scale_to_8(const uint64_t raw, const uint8_t bits) {
 static void render_viewport(const ViewerState& s, const Preset& preset, const int rows,
                             vector<uint8_t>& out_pixels, uint32_t& out_rows_rendered) {
     const size_t total_bits = s.data.size() * 8;
-    const size_t start_bit = s.stofs_bytes * 8 + s.bit_align;
+    const size_t start_bit = s.stofs * 8 + s.bit_align;
     if (start_bit >= total_bits) {
         out_rows_rendered = 0;
         out_pixels.clear();
@@ -191,12 +192,12 @@ static void render_viewport(const ViewerState& s, const Preset& preset, const in
                 default: r = g = b = 0;
             }
         }
-        dst[0]=r; dst[1]=g; dst[2]=b; dst[3]=a;
+        dst[0] = r; dst[1] = g; dst[2] = b; dst[3] = a;
     }
 }
 
 // Save RGBA buffer to PNG (stb)
-static bool save_png(const string &filename, int w, int h, const vector<uint8_t>& buf) {
+static bool save_png(const string &filename, const int w, const int h, const vector<uint8_t>& buf) {
     if (static_cast<int>(buf.size()) < w*h*4) return false;
     const int stride = w * 4;
     const int res = stbi_write_png(filename.c_str(), w, h, 4, buf.data(), stride);
@@ -204,8 +205,8 @@ static bool save_png(const string &filename, int w, int h, const vector<uint8_t>
 }
 
 // Helper: load file into ViewerState
-static bool load_file_into(ViewerState &S, const char *path) {
-    if (!path[0]) return false;
+static bool load_file_into(ViewerState &S, const string &path) {
+    if (path.empty()) return false;
     ifstream in(path, ios::binary | ios::ate);
     if (!in) return false;
     const auto sz = in.tellg();
@@ -214,7 +215,7 @@ static bool load_file_into(ViewerState &S, const char *path) {
     in.read(reinterpret_cast<char *>(tmp.data()), sz);
     S.data.swap(tmp);
     S.filename = path;
-    S.stofs_bytes = 0;
+    S.stofs = 0;
     S.bit_align = 0;
     return true;
 }
@@ -265,7 +266,7 @@ int main(int argc, char** argv) {
     ViewerState S;
     S.data.clear();
 
-    bool show_demo = false;
+    //bool show_demo = false;
 
     // Texture for display
     GLuint tex = 0;
@@ -279,6 +280,13 @@ int main(int argc, char** argv) {
     bool save_requested = false;
     bool load_requested = false;
     vector<uint8_t> rgba_buf;
+
+    if (argc > 1) {
+        //put the filename into path:
+        path = argv[1];
+        load_requested = true;
+    }
+
 
     // main loop
     while (!want_quit) {
@@ -303,12 +311,16 @@ int main(int argc, char** argv) {
             // keyboard navigation (when ImGui not capturing keyboard)
             if (event.type == SDL_KEYDOWN && !io.WantCaptureKeyboard) {
                 SDL_Keycode k = event.key.keysym.sym;
-                if (k == SDLK_LEFT) { S.width_px = max<int>(1, S.width_px - 1); }
-                else if (k == SDLK_RIGHT) { S.width_px = S.width_px + 1; }
-                else if (k == SDLK_UP) {
-                    S.stofs_bytes = (S.stofs_bytes>0) ? S.stofs_bytes - 1 : 0;
-                }
-                else if (k == SDLK_DOWN) { S.stofs_bytes = S.stofs_bytes + 1; }
+                if (k == SDLK_LEFT)
+                    S.width_px = max<int>(1, S.width_px - 1);
+                else if (k == SDLK_RIGHT)
+                    S.width_px = S.width_px + 1;
+                else if (k == SDLK_UP)
+                    S.stofs = (S.stofs > S.width_px * 16) ? S.stofs - S.width_px * 16 : 0;
+                else if (k == SDLK_DOWN)
+                    S.stofs = (static_cast<size_t>(S.stofs + S.width_px * 16) >= S.data.size() - 16)
+                        ? S.stofs
+                        : S.stofs + S.width_px * 16;
                 else if (k == SDLK_PAGEUP) {
                     // compute visible rows
                     int win_w, win_h;
@@ -318,10 +330,10 @@ int main(int argc, char** argv) {
                     int visible_pixels = S.width_px * visible_rows;
                     int visible_bits = visible_pixels * S.bpp;
                     int page_bits = (visible_bits * 2) / 3;
-                    auto start_bit = S.stofs_bytes * 8 + S.bit_align;
+                    auto start_bit = S.stofs * 8 + S.bit_align;
                     auto nstart = start_bit - page_bits;
                     if (nstart < 0) nstart = 0;
-                    S.stofs_bytes = nstart / 8;
+                    S.stofs = nstart / 8;
                     S.bit_align = nstart % 8;
                 }
                 else if (k == SDLK_PAGEDOWN) {
@@ -331,17 +343,31 @@ int main(int argc, char** argv) {
                     int visible_pixels = S.width_px * visible_rows;
                     int visible_bits = visible_pixels * S.bpp;
                     int page_bits = (visible_bits * 2) / 3;
-                    auto start_bit = S.stofs_bytes * 8 + S.bit_align;
+                    auto start_bit = S.stofs * 8 + S.bit_align;
                     int64_t nstart = start_bit + page_bits;
                     if (int64_t total_bits = static_cast<int64_t>(S.data.size()) * 8;
                         nstart > total_bits - S.bpp
                     )
                         nstart = max(0LL, total_bits - S.bpp);
-                    S.stofs_bytes = static_cast<int>(nstart / 8);
+                    S.stofs = nstart / 8;
                     S.bit_align = static_cast<uint8_t>(nstart % 8);
                 }
-                // Shift+arrows for bpp/bit-align
-                if (event.key.keysym.mod & KMOD_SHIFT) {
+                // Shift+Arrows for 1-by-1 offset
+                else if (event.key.keysym.mod & KMOD_SHIFT) {
+                    if (k == SDLK_UP) {
+                        S.stofs = (S.stofs > 0) ? S.stofs - 1 : 0;
+                    } else if (k == SDLK_DOWN) {
+                    S.stofs = (static_cast<size_t>(S.stofs + S.width_px * 16) >= S.data.size() - 16)
+                        ? S.stofs
+                        : S.stofs + 1;
+                    } else if (k == SDLK_LEFT) {
+                        //TODO come up w/something
+                    } else if (k == SDLK_RIGHT) {
+                        //TODO come up w/something
+                    }
+                }
+                // Alt+arrows for bpp/bit-align
+                else if (event.key.keysym.mod & KMOD_ALT) {
                     if (k == SDLK_UP) {
                         // cycle bpp up
                         constexpr int choices[4] = {1,4,8,16};
@@ -371,13 +397,10 @@ int main(int argc, char** argv) {
         // Left-side UI (Controls) - give an initial size and allow docking
         ImGui::SetNextWindowSize(ImVec2(320, 400), ImGuiCond_FirstUseEver);
         ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_None);
+        ImGuiIO& uiio = ImGui::GetIO();
+        float ui_scale = uiio.FontGlobalScale > 0.0f ? uiio.FontGlobalScale : 1.0f;
 
-        if (argc > 1) {
-            //put the filename into path:
-            path = argv[1];
-            load_requested = true;
-        }
-
+        ImGui::PushItemWidth(120.0f * ui_scale);
         ImGui::InputText("File path", path.data(), path.size());
         ImGui::SameLine();
         if (ImGui::Button("Browse...")) {
@@ -392,6 +415,7 @@ int main(int argc, char** argv) {
                 cerr << "NFD error: " << NFD_GetError() << endl;
             }
         }
+        ImGui::PopItemWidth();
 
         if (ImGui::Button("Load file")) {
             load_requested = true;
@@ -403,9 +427,10 @@ int main(int argc, char** argv) {
 
         ImGui::Separator();
 
+        ImGui::PushItemWidth(120.0f * ui_scale);
         ImGui::InputInt("Width (px/row)", &S.width_px);
         if (S.width_px < 1) S.width_px = 1;
-        ImGui::InputInt("Start ofs (bytes)", &S.stofs_bytes);
+        ImGui::InputInt("Start ofs (bytes)", &S.stofs);
         ImGui::InputInt("Bit alignment (0..7)", &S.bit_align);
         if (S.bit_align < 0) S.bit_align = 0;
         if (S.bit_align > 7) S.bit_align = 7;
@@ -415,6 +440,7 @@ int main(int argc, char** argv) {
         if (ImGui::Button("4 BPP")) S.bpp = 4;  ImGui::SameLine();
         if (ImGui::Button("8 BPP")) S.bpp = 8;  ImGui::SameLine();
         if (ImGui::Button("16 BPP")) S.bpp = 16;
+        ImGui::PopItemWidth();
 
         ImGui::Separator();
 
@@ -430,9 +456,16 @@ int main(int argc, char** argv) {
         ImGui::Checkbox("Byte-order LE", &S.byte_order_le);
 
         if (ImGui::Button("Center start (0)")) {
-            S.stofs_bytes = 0;
+            S.stofs = 0;
             S.bit_align = 0;
         }
+
+        ImGui::Text("Controls:");
+        ImGui::Text("↑/↓ Offset -/+ 16 scanlines");
+        ImGui::Text("←/→ Width -+");
+        ImGui::Text("Shift+↑/↓ Offset +- 1");
+        ImGui::Text("Alt+↑/↓ Change BPP");
+        ImGui::Text("Alt+←/→ Change bit-align");
 
         ImGui::End();
 
@@ -491,13 +524,20 @@ int main(int argc, char** argv) {
 
         // Save PNG if requested (saves the whole current rendered rectangle into PNG)
         if (save_requested && rows_rendered > 0) {
-            string outname = "rawviewer_out.png";
-            if (save_png(outname, tex_w, tex_h, pixels)) {
-                cerr << "Saved " << outname << endl;
-            } else {
-                cerr << "Failed to save PNG\n";
+            int outc{-1};
+            while (save_requested && outc++ < 999) {
+                std::string outname = std::format("rawviewer{:03}.png", outc);
+                if (filesystem::exists(outname)) continue;
+                cerr << "saving \"" << outname << "\"...";
+                if (save_png(outname, tex_w, tex_h, pixels)) {
+                    cerr << "Saved " << outname << endl;
+                    save_requested = false;
+                }
             }
-            save_requested = false;
+            if (save_requested) {
+                cerr << "Failed to save PNG\n";
+                save_requested = false;
+            }
         }
 
         // Render ImGui

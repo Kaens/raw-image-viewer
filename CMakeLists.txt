@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.31)
 project(rawviewer_sdl_imgui LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 
@@ -108,19 +108,13 @@ if(WIN32)
 endif()
 if (MINGW)
   target_compile_options(rawviewer PRIVATE
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
+    -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation
     -Os
-    -s
-    -ffunction-sections
-    -fdata-sections
-    -fno-align-functions
-    -fno-align-jumps
-    -fno-align-loops
-    -fno-align-labels
-    -fno-unroll-loops
-    -fno-inline-functions
+    -ffunction-sections -fdata-sections
+    -fno-align-functions -fno-align-jumps
+    -fno-align-loops -fno-align-labels
+    -fno-unroll-loops -fno-inline-functions
+    -municode
   )
   target_link_options(rawviewer PRIVATE
     -Wl,--gc-sections
