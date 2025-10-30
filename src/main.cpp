@@ -393,7 +393,7 @@ int main(int argc, char** argv) {
                     if (int64_t total_bits = static_cast<int64_t>(S.data.size()) * 8;
                         nstart > total_bits - S.bpp
                     )
-                        nstart = max(0LL, total_bits - S.bpp);
+                        nstart = max(static_cast<int64_t>(0), total_bits - S.bpp);
                     S.stofs = nstart / 8;
                     S.bit_align = static_cast<uint8_t>(nstart % 8);
                 }
