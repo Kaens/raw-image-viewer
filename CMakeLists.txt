@@ -56,8 +56,9 @@ target_sources(rawviewer
 )
 
 # glew source
+find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
-target_link_libraries(rawviewer PRIVATE GLEW::GLEW)
+target_link_libraries(rawviewer PRIVATE OpenGL::GL GLEW::GLEW)
 
 #NFD source
 FetchContent_Declare(

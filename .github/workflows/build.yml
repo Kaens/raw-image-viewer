@@ -7,101 +7,115 @@ on:
     branches: [ "main" ]
 
 permissions:
-  contents: write
+  contents: write   # needed for release uploads
 
 env:
   BUILD_TYPE: MinSizeRel
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows-x86_64
-            shell: msys2 {0}
-          - os: ubuntu-latest
-            platform: linux-x86_64
-            shell: bash
-
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # Windows setup
-    - name: Setup dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      uses: msys2/setup-msys2@v2
-      with:
-        update: true
-        install: >-
-          mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-ninja
-          mingw-w64-x86_64-SDL2
-          mingw-w64-x86_64-glew
-          upx
-          zip
-        cache: true
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-glew
+            upx
+            zip
+            mingw-w64-x86_64-ccache
 
-    # Linux setup
-    - name: Setup dependencies (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential cmake ninja-build \
-          libsdl2-dev libglew-dev upx
+      - name: Configure and Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+          cmake --build build -j$(nproc)
 
-    - name: Configure and Build (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
-        cmake --build build -j$(nproc)
+      - name: Package zip for Release
+        run: |
+          cd build
+          EXE=rawviewer.exe
+          upx --best --overlay=strip "$EXE"
+          DATE=$(date +%Y%m%d)
+          ZIPNAME="rawviewer-windows-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+          zip "$ZIPNAME" "$EXE"
 
-    - name: Configure and Build (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
-        cmake --build build -j$(nproc)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIPNAME }}
+          path: build/${{ env.ZIPNAME }}
 
-    - name: Package zip for Release (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        cd build
-        EXE=rawviewer.exe
-        upx --best --overlay=strip $EXE
-        DATE=$(date +%Y%m%d)
-        ZIPNAME="rawviewer-windows-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
-        echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
-        zip "$ZIPNAME" $EXE
+      - name: Upload to "latest" Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest Build
+          artifacts: build/${{ env.ZIPNAME }}
+          allowUpdates: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Package zip for Release (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        cd build
-        EXE=rawviewer
-        upx --best --overlay=strip $EXE
-        DATE=$(date +%Y%m%d)
-        ZIPNAME="rawviewer-linux-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
-        echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
-        zip "$ZIPNAME" $EXE
+  linux:
+    runs-on: ubuntu-latest
+    container:
+      image: gcc:15   # not giving up on C++20
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Upload Artifact (for CI)
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ZIPNAME }}
-        path: build/${{ env.ZIPNAME }}
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config \
+            libsdl2-dev libglew-dev libgtk-3-dev \
+            upx zip ccache
 
-    - name: Upload to "latest" Release
-      uses: ncipollo/release-action@v1
-      with:
-        tag: latest
-        name: Latest Build
-        artifacts: build/${{ env.ZIPNAME }}
-        allowUpdates: true
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure and Build
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          gcc --version
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+          cmake --build build -j$(nproc)
+
+      - name: Package zip for Release
+        run: |
+          cd build
+          EXE=rawviewer
+          upx --best --overlay=strip "$EXE"
+          DATE=$(date +%Y%m%d)
+          ZIPNAME="rawviewer-linux-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+          zip "$ZIPNAME" "$EXE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIPNAME }}
+          path: build/${{ env.ZIPNAME }}
+
+      - name: Upload to "latest" Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest Build
+          artifacts: build/${{ env.ZIPNAME }}
+          allowUpdates: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

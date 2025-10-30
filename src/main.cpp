@@ -87,25 +87,25 @@ static vector<Preset> build_presets() { //not all of these are common
     vector<Preset> p;
     p.push_back({"1-bit: Monochrome (MSB)", {1}, {{'y',1}}});
     p.push_back({"4-bit: Grayscale", {4}, {{'y',4}}});
-    p.push_back({"4-bit: 2R-1G-1B", {4}, {{'r',2},{'g',1},{'b',1}}});
+    p.push_back({"4-bit: 2R-1G-1B", {4}, {{'r',2}, {'g',1}, {'b',1}}});
     p.push_back({"8-bit: Grayscale", {8}, {{'y',8}}});
-    p.push_back({"8-bit: R3-G3-B2", {8}, {{'r',3},{'g',3},{'b',2}}});
-    p.push_back({"8-bit: B3-G3-R2", {8}, {{'b',3},{'g',3},{'r',2}}});
-    p.push_back({"8-bit: R2-G3-B3", {8}, {{'r',2},{'g',3},{'b',3}}});
-    p.push_back({"8-bit: A2-R2-G2-B2", {8}, {{'a',2},{'r',2},{'g',2},{'b',2}}});
-    p.push_back({"8-bit: A1-R2-G3-B2", {8}, {{'a',1},{'r',2},{'g',3},{'b',2}}});
-    p.push_back({"16-bit: R5-G6-B5", {16}, {{'r',5},{'g',6},{'b',5}}});
-    p.push_back({"16-bit: A1-R5-G5-B5", {16}, {{'a',1},{'r',5},{'g',5},{'b',5}}});
-    p.push_back({"16-bit: R4-G4-B4-A4", {16}, {{'r',4},{'g',4},{'b',4},{'a',4}}});
-    p.push_back({"16-bit: R3-G4-B3", {16}, {{'r',3},{'g',4},{'b',3}}});
-    p.push_back({"16-bit: B3-G4-R3", {16}, {{'b',3},{'g',4},{'r',3}}});
-    p.push_back({"16-bit: A1-R3-G3-B3", {16}, {{'a',1},{'r',3},{'g',3},{'b',3}}});
-    p.push_back({"24-bit: R-G-B", {24}, {{'r',8},{'g',8},{'b',8}}});
-    p.push_back({"24-bit: B-G-R", {24}, {{'b',8},{'g',8},{'r',8}}});
-    p.push_back({"32-bit: R-G-B-A", {32}, {{'r',8},{'g',8},{'b',8}, {'a',8}}});
-    p.push_back({"32-bit: A-R-G-B", {32}, {{'a',8}, {'r',8},{'g',8},{'b',8}}});
-    p.push_back({"32-bit: A-B-G-R", {32}, {{'a',8},{'b',8},{'g',8},{'r',8}}});
-    p.push_back({"32-bit: B-G-R-A", {32}, {{'b',8},{'g',8},{'r',8},{'a',8}}});
+    p.push_back({"8-bit: R3-G3-B2", {8}, {{'r',3}, {'g',3}, {'b',2}}});
+    p.push_back({"8-bit: B3-G3-R2", {8}, {{'b',3}, {'g',3}, {'r',2}}});
+    p.push_back({"8-bit: R2-G3-B3", {8}, {{'r',2}, {'g',3}, {'b',3}}});
+    p.push_back({"8-bit: A2-R2-G2-B2", {8}, {{'a',2}, {'r',2}, {'g',2}, {'b',2}}});
+    p.push_back({"8-bit: A1-R2-G3-B2", {8}, {{'a',1}, {'r',2}, {'g',3}, {'b',2}}});
+    p.push_back({"16-bit: R5-G6-B5", {16}, {{'r',5}, {'g',6}, {'b',5}}});
+    p.push_back({"16-bit: A1-R5-G5-B5", {16}, {{'a',1}, {'r',5}, {'g',5}, {'b',5}}});
+    p.push_back({"16-bit: R4-G4-B4-A4", {16}, {{'r',4}, {'g',4}, {'b',4}, {'a',4}}});
+    p.push_back({"16-bit: R3-G4-B3", {16}, {{'r',3}, {'g',4}, {'b',3}}});
+    p.push_back({"16-bit: B3-G4-R3", {16}, {{'b',3}, {'g',4}, {'r',3}}});
+    p.push_back({"16-bit: A1-R3-G3-B3", {16}, {{'a',1}, {'r',3}, {'g',3}, {'b',3}}});
+    p.push_back({"24-bit: R-G-B", {24}, {{'r',8}, {'g',8}, {'b',8}}});
+    p.push_back({"24-bit: B-G-R", {24}, {{'b',8}, {'g',8}, {'r',8}}});
+    p.push_back({"32-bit: R-G-B-A", {32}, {{'r',8}, {'g',8}, {'b',8}, {'a',8}}});
+    p.push_back({"32-bit: A-R-G-B", {32}, {{'a',8}, {'r',8}, {'g',8}, {'b',8}}});
+    p.push_back({"32-bit: A-B-G-R", {32}, {{'a',8}, {'b',8}, {'g',8}, {'r',8}}});
+    p.push_back({"32-bit: B-G-R-A", {32}, {{'b',8}, {'g',8}, {'r',8}, {'a',8}}});
     return p;
 }
 
@@ -393,7 +393,7 @@ int main(int argc, char** argv) {
                     if (int64_t total_bits = static_cast<int64_t>(S.data.size()) * 8;
                         nstart > total_bits - S.bpp
                     )
-                        nstart = max(0LL, total_bits - S.bpp);
+                        nstart = max<int64_t>(0, total_bits - S.bpp);
                     S.stofs = nstart / 8;
                     S.bit_align = static_cast<uint8_t>(nstart % 8);
                 }
