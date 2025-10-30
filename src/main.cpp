@@ -66,10 +66,10 @@ static inline uint64_t adjust_endianness_pixel(const size_t pixel_val, const int
         const auto shift = (nbytes - 1 - i) * 8;
         bytes[i] = (pixel_val >> shift) & 0xFFu;
     }
-    // reverse
+    // reverse the bytes for little-endian interpretation
     uint64_t out = 0;
     for (auto i = 0; i < nbytes; ++i) {
-        out = (out << 8) | bytes[i];
+        out = (out << 8) | bytes[nbytes - 1 - i];
     }
     return out & ((1ull << bpp) - 1ull);
 }
@@ -100,6 +100,12 @@ static vector<Preset> build_presets() { //not all of these are common
     p.push_back({"16-bit: R3-G4-B3", {16}, {{'r',3},{'g',4},{'b',3}}});
     p.push_back({"16-bit: B3-G4-R3", {16}, {{'b',3},{'g',4},{'r',3}}});
     p.push_back({"16-bit: A1-R3-G3-B3", {16}, {{'a',1},{'r',3},{'g',3},{'b',3}}});
+    p.push_back({"24-bit: R-G-B", {24}, {{'r',8},{'g',8},{'b',8}}});
+    p.push_back({"24-bit: B-G-R", {24}, {{'b',8},{'g',8},{'r',8}}});
+    p.push_back({"32-bit: R-G-B-A", {32}, {{'r',8},{'g',8},{'b',8}, {'a',8}}});
+    p.push_back({"32-bit: A-R-G-B", {32}, {{'a',8}, {'r',8},{'g',8},{'b',8}}});
+    p.push_back({"32-bit: A-B-G-R", {32}, {{'a',8},{'b',8},{'g',8},{'r',8}}});
+    p.push_back({"32-bit: B-G-R-A", {32}, {{'b',8},{'g',8},{'r',8},{'a',8}}});
     return p;
 }
 
@@ -107,13 +113,13 @@ static vector<Preset> build_presets() { //not all of these are common
 struct ViewerState {
     vector<uint8_t> data;
     string filename;
-    int stofs = 0;
-    int width_px = 256; // "int" as per InputInt in ImGui
-    int bpp = 8;
-    int bit_align = 0;
-    int preset_idx = 3; // 8-bit grayscale, corresponds with bpp
-    bool bit_order_msb = true;
-    bool byte_order_le = false;
+    int stofs{};
+    int width_px{256}; // "int" as per InputInt in ImGui
+    int bpp{8};
+    int bit_align{};
+    int preset_idx{3}; // 8-bit grayscale, corresponds with bpp
+    bool bit_order_msb{true};
+    bool byte_order_le{false};
 };
 
 static inline uint8_t scale_to_8(const uint64_t raw, const uint8_t bits) {
@@ -138,7 +144,7 @@ static void render_viewport(const ViewerState& s, const Preset& preset, const in
         out_pixels.clear();
         return;
     }
-    const auto width = max<uint32_t>(1, s.width_px);
+    const auto width = max<int>(1, s.width_px);
     const auto pixels_to_render = rows * width;
     const auto pixels_available = (total_bits - start_bit) / s.bpp;
     if (pixels_available == 0) {
@@ -254,8 +260,13 @@ int main(int argc, char** argv) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // enable docking
+    //io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // enable multi-vp / Windows
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // enable keyboard controls
+    io.ConfigDpiScaleFonts = true;
+    io.ConfigDpiScaleViewports = true;
     io.IniFilename = "imgui_layout.ini"; // persist layout
     ImGui::StyleColorsDark();
+    //io.Fonts->AddFontFromFileTTF("mO'sOul_v1.0.ttf", 14);
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
@@ -311,7 +322,41 @@ int main(int argc, char** argv) {
             // keyboard navigation (when ImGui not capturing keyboard)
             if (event.type == SDL_KEYDOWN && !io.WantCaptureKeyboard) {
                 SDL_Keycode k = event.key.keysym.sym;
-                if (k == SDLK_LEFT)
+                // Shift+Arrows for 1-by-1 offset
+                if (event.key.keysym.mod & KMOD_SHIFT) {
+                    if (k == SDLK_UP) {
+                        S.stofs = (S.stofs > S.width_px) ? S.stofs - S.width_px : 0;
+                    } else if (k == SDLK_DOWN) {
+                        S.stofs = (static_cast<size_t>(S.stofs + S.width_px * 16) >= S.data.size() - 16)
+                        ? S.stofs
+                        : S.stofs + S.width_px;
+                    } else if (k == SDLK_LEFT) {
+                        S.stofs = (S.stofs > 0) ? S.stofs - 1 : 0;
+                    } else if (k == SDLK_RIGHT) {
+                        S.stofs = (static_cast<size_t>(S.stofs + S.width_px * 16) >= S.data.size() - 16)
+                        ? S.stofs
+                        : S.stofs + 1;
+                    }
+                }
+                // Alt+arrows for bpp/bit-align
+                else if (event.key.keysym.mod & KMOD_ALT) {
+                    if (k == SDLK_UP) {
+                        // cycle bpp up
+                        constexpr int choices[]{1,4,8,16,24,32};
+                        int i{}; while (i < 4 && choices[i] != S.bpp) ++i;
+                        i = (i + 1) % 4; S.bpp = choices[i];
+                    } else if (k == SDLK_DOWN) {
+                        // cycle bpp down
+                        constexpr int choices[]{1,4,8,16,24,32};
+                        int i{}; while (i < 4 && choices[i] != S.bpp) ++i;
+                        i = (i + 3) % 4; S.bpp = choices[i];
+                    } else if (k == SDLK_LEFT) {
+                        S.bit_align = max<uint8_t>(0, S.bit_align - 1);
+                    } else if (k == SDLK_RIGHT) {
+                        S.bit_align = min<uint8_t>(7, S.bit_align + 1);
+                    }
+                }
+                else if (k == SDLK_LEFT)
                     S.width_px = max<int>(1, S.width_px - 1);
                 else if (k == SDLK_RIGHT)
                     S.width_px = S.width_px + 1;
@@ -352,37 +397,6 @@ int main(int argc, char** argv) {
                     S.stofs = nstart / 8;
                     S.bit_align = static_cast<uint8_t>(nstart % 8);
                 }
-                // Shift+Arrows for 1-by-1 offset
-                else if (event.key.keysym.mod & KMOD_SHIFT) {
-                    if (k == SDLK_UP) {
-                        S.stofs = (S.stofs > 0) ? S.stofs - 1 : 0;
-                    } else if (k == SDLK_DOWN) {
-                    S.stofs = (static_cast<size_t>(S.stofs + S.width_px * 16) >= S.data.size() - 16)
-                        ? S.stofs
-                        : S.stofs + 1;
-                    } else if (k == SDLK_LEFT) {
-                        //TODO come up w/something
-                    } else if (k == SDLK_RIGHT) {
-                        //TODO come up w/something
-                    }
-                }
-                // Alt+arrows for bpp/bit-align
-                else if (event.key.keysym.mod & KMOD_ALT) {
-                    if (k == SDLK_UP) {
-                        // cycle bpp up
-                        constexpr int choices[4] = {1,4,8,16};
-                        int i=0; while(i<4 && choices[i]!=S.bpp) ++i;
-                        i = (i+1)%4; S.bpp = choices[i];
-                    } else if (k == SDLK_DOWN) {
-                        constexpr int choices[4] = {1,4,8,16};
-                        int i=0; while(i<4 && choices[i]!=S.bpp) ++i;
-                        i = (i+3)%4; S.bpp = choices[i];
-                    } else if (k == SDLK_LEFT) {
-                        S.bit_align = max<uint8_t>(0, S.bit_align - 1);
-                    } else if (k == SDLK_RIGHT) {
-                        S.bit_align = min<uint8_t>(7, S.bit_align + 1);
-                    }
-                }
             }
         }
 
@@ -401,9 +415,9 @@ int main(int argc, char** argv) {
         float ui_scale = uiio.FontGlobalScale > 0.0f ? uiio.FontGlobalScale : 1.0f;
 
         ImGui::PushItemWidth(120.0f * ui_scale);
-        ImGui::InputText("File path", path.data(), path.size());
+        ImGui::InputText("File", path.data(), path.size());
         ImGui::SameLine();
-        if (ImGui::Button("Browse...")) {
+        if (ImGui::Button("...")) {
             nfdchar_t *outPath = nullptr;
             if (nfdresult_t result = NFD_OpenDialog(&outPath, nullptr, 0, nullptr); result == NFD_OKAY) {
                 path = outPath;
@@ -427,19 +441,19 @@ int main(int argc, char** argv) {
 
         ImGui::Separator();
 
-        ImGui::PushItemWidth(120.0f * ui_scale);
+        ImGui::PushItemWidth(130.0f * ui_scale);
         ImGui::InputInt("Width (px/row)", &S.width_px);
         if (S.width_px < 1) S.width_px = 1;
-        ImGui::InputInt("Start ofs (bytes)", &S.stofs);
-        ImGui::InputInt("Bit alignment (0..7)", &S.bit_align);
+        ImGui::InputInt("Start offset", &S.stofs);
+        ImGui::InputInt("Bit alignment", &S.bit_align);
         if (S.bit_align < 0) S.bit_align = 0;
         if (S.bit_align > 7) S.bit_align = 7;
         ImGui::InputInt("Bits per pixel", &S.bpp);
         // Constrain bpp to {1,4,8,16} via buttons
-        if (ImGui::Button("1 BPP")) S.bpp = 1;  ImGui::SameLine();
-        if (ImGui::Button("4 BPP")) S.bpp = 4;  ImGui::SameLine();
-        if (ImGui::Button("8 BPP")) S.bpp = 8;  ImGui::SameLine();
-        if (ImGui::Button("16 BPP")) S.bpp = 16;
+        if (ImGui::Button("1 BPP")) S.bpp = 1;
+        ImGui::SameLine(); if (ImGui::Button("4 BPP")) S.bpp = 4;
+        ImGui::SameLine(); if (ImGui::Button("8 BPP")) S.bpp = 8;
+        ImGui::SameLine(); if (ImGui::Button("16 BPP")) S.bpp = 16;
         ImGui::PopItemWidth();
 
         ImGui::Separator();
@@ -447,8 +461,13 @@ int main(int argc, char** argv) {
         // Preset selector
         ImGui::Text("Presets:");
         for (int i = 0; i < static_cast<int>(presets.size()); ++i)
-            if (ImGui::Selectable(presets[i].label.c_str(), i == S.preset_idx))
+            if (ImGui::Selectable(presets[i].label.c_str(), i == S.preset_idx)) {
                 S.preset_idx = i;
+                // set bits-per-pixel to the preset total so 24/32 presets actually work
+                int total_bits = 0;
+                for (const auto &f : presets[i].fields) total_bits += f.bits;
+                if (total_bits > 0) S.bpp = total_bits;
+            }
 
         ImGui::Separator();
         ImGui::Text("Orders:");
@@ -460,12 +479,15 @@ int main(int argc, char** argv) {
             S.bit_align = 0;
         }
 
-        ImGui::Text("Controls:");
-        ImGui::Text("↑/↓ Offset -/+ 16 scanlines");
-        ImGui::Text("←/→ Width -+");
-        ImGui::Text("Shift+↑/↓ Offset +- 1");
-        ImGui::Text("Alt+↑/↓ Change BPP");
-        ImGui::Text("Alt+←/→ Change bit-align");
+        ImGui::Separator();
+
+        ImGui::Text("Hotkeys:");
+        ImGui::Text("Up/Dn Offset -+ 16 lines");
+        ImGui::Text("Lt/Rt Width -+");
+        ImGui::Text("Shift+Up/Dn Ofs -+ 1 line");
+        ImGui::Text("Shift+Lt/Rt Ofs -+ 1 byte");
+        ImGui::Text("Alt+Up/Dn Change BPP");
+        ImGui::Text("Alt+Lt/Rt Change bit-align");
 
         ImGui::End();
 
@@ -526,7 +548,7 @@ int main(int argc, char** argv) {
         if (save_requested && rows_rendered > 0) {
             int outc{-1};
             while (save_requested && outc++ < 999) {
-                std::string outname = std::format("rawviewer{:03}.png", outc);
+                std::string outname = format("rawviewer{:03}.png", outc);
                 if (filesystem::exists(outname)) continue;
                 cerr << "saving \"" << outname << "\"...";
                 if (save_png(outname, tex_w, tex_h, pixels)) {
