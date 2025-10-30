@@ -1,0 +1,107 @@
+name: CMake cross-platform
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: MinSizeRel
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x86_64
+            shell: msys2 {0}
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            shell: bash
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # Windows setup
+    - name: Setup dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-SDL2
+          mingw-w64-x86_64-glew
+          upx
+          zip
+        cache: true
+
+    # Linux setup
+    - name: Setup dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential cmake ninja-build \
+          libsdl2-dev libglew-dev upx
+
+    - name: Configure and Build (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: msys2 {0}
+      run: |
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+        cmake --build build -j$(nproc)
+
+    - name: Configure and Build (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+        cmake --build build -j$(nproc)
+
+    - name: Package zip for Release (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: msys2 {0}
+      run: |
+        cd build
+        EXE=rawviewer.exe
+        upx --best --overlay=strip $EXE
+        DATE=$(date +%Y%m%d)
+        ZIPNAME="rawviewer-windows-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
+        echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+        zip "$ZIPNAME" $EXE
+
+    - name: Package zip for Release (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cd build
+        EXE=rawviewer
+        upx --best --overlay=strip $EXE
+        DATE=$(date +%Y%m%d)
+        ZIPNAME="rawviewer-linux-x86_64-${DATE}-${GITHUB_RUN_NUMBER}.zip"
+        echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+        zip "$ZIPNAME" $EXE
+
+    - name: Upload Artifact (for CI)
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ZIPNAME }}
+        path: build/${{ env.ZIPNAME }}
+
+    - name: Upload to "latest" Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: latest
+        name: Latest Build
+        artifacts: build/${{ env.ZIPNAME }}
+        allowUpdates: true
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
