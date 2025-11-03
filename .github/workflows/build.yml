@@ -40,7 +40,7 @@ jobs:
       - name: Configure and Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
-          cmake --build build -j$(nproc)
+          ninja -C build
 
       - name: Package zip for Release
         run: |
@@ -91,7 +91,7 @@ jobs:
         run: |
           gcc --version
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
-          cmake --build build -j$(nproc)
+          ninja -C build
 
       - name: Package zip for Release
         run: |
