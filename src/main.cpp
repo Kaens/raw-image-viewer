@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     int tex_w = 0, tex_h = 0;
 
     // UI state
-    string path;
+    string path; path.resize(4096);
     //int selected_preset = 0;
 
     bool want_quit = false;
